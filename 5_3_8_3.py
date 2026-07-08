@@ -33,6 +33,15 @@ def motor_go(speed: int):
     GPIO.output(AIN1, False); GPIO.output(AIN2, True)
     GPIO.output(BIN1, False); GPIO.output(BIN2, True)
 
+
+def drive(left_speed: int, right_speed: int):
+    """차동 속도 전진 제어"""
+    L_Motor.ChangeDutyCycle(left_speed)
+    R_Motor.ChangeDutyCycle(right_speed)
+    GPIO.output(AIN1, False); GPIO.output(AIN2, True)
+    GPIO.output(BIN1, False); GPIO.output(BIN2, True)
+
+
 def motor_right(speed: int):
     """강한 제자리 우회전 (탈선 복귀용)"""
     L_Motor.ChangeDutyCycle(speed)
@@ -66,6 +75,7 @@ def main():
     camera = mycamera.MyPiCamera(1280, 720)
 
     BASE_SPEED = 70
+    RECOVERY_SPEED = 40
     DEADBAND = 18
     MIN_LINE_AREA = 250
 
@@ -125,38 +135,30 @@ def main():
                 right_cx = lines[1][0]
                 target_cx = (left_cx + right_cx) // 2
                 error = center_x - target_cx
+                turn = int(min(abs(error) * 0.2, BASE_SPEED))
 
-                if abs(error) <= DEADBAND:
-                    motor_go(BASE_SPEED)
-                elif error > 0:
-                    # 가상 중심선이 왼쪽에 있음 -> 전진하면서 부드럽게 좌회전 (발작 방지)
-                    L_Motor.ChangeDutyCycle(0)
-                    R_Motor.ChangeDutyCycle(BASE_SPEED)
-                    GPIO.output(AIN1, False); GPIO.output(AIN2, True)
-                    GPIO.output(BIN1, False); GPIO.output(BIN2, True)
-                else:
-                    # 가상 중심선이 오른쪽에 있음 -> 전진하면서 부드럽게 우회전 (발작 방지)
-                    L_Motor.ChangeDutyCycle(BASE_SPEED)
-                    R_Motor.ChangeDutyCycle(0)
-                    GPIO.output(AIN1, False); GPIO.output(AIN2, True)
-                    GPIO.output(BIN1, False); GPIO.output(BIN2, True)
+                left_speed = BASE_SPEED
+                right_speed = BASE_SPEED
+                if error > 0:
+                    right_speed = max(0, BASE_SPEED - turn)
+                elif error < 0:
+                    left_speed = max(0, BASE_SPEED - turn)
 
-                print(f"Two lines -> target={target_cx}, error={error}")
+                drive(left_speed, right_speed)
+                print(f"Two lines -> target={target_cx}, error={error}, left={left_speed}, right={right_speed}")
 
             elif len(lines) == 1:
                 single_cx = lines[0][0]
                 
                 # [카메라 시야의 역설 반영]
                 if single_cx < center_x:
-                    # 선이 왼쪽에 보임 = 남은 선은 '오른쪽 라인' = 로봇이 우측으로 대폭 탈선함
-                    # 강한 제자리 좌회전 함수를 사용하여 라인 안쪽으로 복귀
-                    motor_left(BASE_SPEED)
-                    print("One line on left (Robot drifted Right) -> QUICK LEFT TO RECOVER")
+                    # 선이 왼쪽에 보임 = 로봇이 오른쪽으로 탈선한 것
+                    motor_left(RECOVERY_SPEED)
+                    print("One line on left (Robot drifted Right) -> RECOVER LEFT")
                 else:
-                    # 선이 오른쪽에 보임 = 남은 선은 '왼쪽 라인' = 로봇이 좌측으로 대폭 탈선함
-                    # 강한 제자리 우회전 함수를 사용하여 라인 안쪽으로 복귀
-                    motor_right(BASE_SPEED)
-                    print("One line on right (Robot drifted Left) -> QUICK RIGHT TO RECOVER")
+                    # 선이 오른쪽에 보임 = 로봇이 왼쪽으로 탈선한 것
+                    motor_right(RECOVERY_SPEED)
+                    print("One line on right (Robot drifted Left) -> RECOVER RIGHT")
 
             else:
                 motor_go(0)
