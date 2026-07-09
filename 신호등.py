@@ -65,13 +65,13 @@ buzzer_deadline = 0.0
 
 def buzzer_beep(duration: float = 0.2):
     pass
-    # global buzzer_active, buzzer_deadline
-    # if buzzer_active:
-    #     return
+    global buzzer_active, buzzer_deadline
+    if buzzer_active:
+        return
 
-    # BUZZER.play(261)
-    # buzzer_active = True
-    # buzzer_deadline = time.time() + duration
+    BUZZER.play(261)
+    buzzer_active = True
+    buzzer_deadline = time.time() + duration
 
 
 def buzzer_update():
@@ -93,7 +93,7 @@ def detect_traffic_light(light_roi):
     orange_area = cv2.countNonZero(orange_mask)
     green_area = cv2.countNonZero(green_mask)
     area = light_roi.shape[0] * light_roi.shape[1]
-    threshold = area * 0.02
+    threshold = area * 0.01
 
     if red_area > threshold:
         return 'red'
@@ -191,10 +191,10 @@ def main():
             binary_frame = cv2.erode(binary_frame, None, iterations=1)
             binary_frame = cv2.dilate(binary_frame, None, iterations=1)
 
-            roi_top_frame = frame[160:320, :]
-            roi_bottom_frame = frame[320:, :]
-            roi_top = binary_frame[160:320, :]
-            roi_bottom = binary_frame[320:, :]
+            roi_top_frame = frame[220:360, :]
+            roi_bottom_frame = frame[360:480, :]
+            roi_top = binary_frame[220:360, :]
+            roi_bottom = binary_frame[360:480, :]
             h_b, w_b = roi_bottom.shape[:2]
             center_x_b = w_b // 2
 
