@@ -111,7 +111,7 @@ def get_cx_cy_angle(roi):
         gray = roi
 
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, thresh = cv2.threshold(blur, 130, 255, cv2.THRESH_BINARY)
+    _, thresh = cv2.threshold(blur, 150, 255, cv2.THRESH_BINARY)
     mask = cv2.erode(thresh, None, iterations=1)
     mask = cv2.dilate(mask, None, iterations=1)
 
