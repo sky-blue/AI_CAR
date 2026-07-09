@@ -191,10 +191,10 @@ def main():
             binary_frame = cv2.erode(binary_frame, None, iterations=1)
             binary_frame = cv2.dilate(binary_frame, None, iterations=1)
 
-            roi_top_frame = frame[220:360, :]
-            roi_bottom_frame = frame[360:480, :]
-            roi_top = binary_frame[220:360, :]
-            roi_bottom = binary_frame[360:480, :]
+            roi_top_frame = frame[260:380, :]
+            roi_bottom_frame = frame[380:500, :]
+            roi_top = frame[260:380, :]
+            roi_bottom = frame[380:500, :]
             h_b, w_b = roi_bottom.shape[:2]
             center_x_b = w_b // 2
 
