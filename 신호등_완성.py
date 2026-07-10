@@ -630,7 +630,7 @@ def main():
                 2
             )
             cv2.imshow('Camera', frame)  
-            cv2.imshow("Bottom ROI", roi_bottom_frame)
+            #cv2.imshow("Bottom ROI", roi_bottom_frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
