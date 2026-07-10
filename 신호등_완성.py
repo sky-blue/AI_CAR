@@ -23,6 +23,38 @@ PWMB = 23; BIN1 = 25; BIN2 = 24
 BUZZER_PIN = 12
 
 # -------------------------------
+# OpenCV DNN Object Detection
+# -------------------------------
+CLASSES = [
+    "background",
+    "aeroplane",
+    "bicycle",
+    "bird",
+    "boat",
+    "bottle",
+    "bus",
+    "car",
+    "cat",
+    "chair",
+    "cow",
+    "diningtable",
+    "dog",
+    "horse",
+    "motorbike",
+    "person",
+    "pottedplant",
+    "sheep",
+    "sofa",
+    "train",
+    "tvmonitor"
+]
+
+net = cv2.dnn.readNetFromCaffe(
+    "MobileNetSSD_deploy.prototxt",
+    "MobileNetSSD_deploy.caffemodel"
+)
+
+# -------------------------------
 # Motor Control Functions
 # -------------------------------
 def motor_drive(left_speed: int, right_speed: int):
@@ -161,6 +193,62 @@ def detect_traffic_light(light_roi):
 
     return None,None,area
 
+def detect_person(frame):
+
+    h, w = frame.shape[:2]
+
+    # 중앙 70%만 사용
+    margin_x = int(w * 0.15)
+    margin_y = int(h * 0.15)
+
+    detect_frame = frame[
+        margin_y:h-margin_y,
+        margin_x:w-margin_x
+    ]
+
+    dh, dw = detect_frame.shape[:2]
+
+    blob = cv2.dnn.blobFromImage(
+        cv2.resize(detect_frame, (300,300)),
+        0.007843,
+        (300,300),
+        127.5
+    )
+
+    net.setInput(blob)
+
+    detections = net.forward()
+
+
+    for i in range(detections.shape[2]):
+
+        confidence = detections[0,0,i,2]
+
+        if confidence > 0.5:
+
+            idx = int(detections[0,0,i,1])
+
+            label = CLASSES[idx]
+
+            if label == "person":
+
+                box = detections[0,0,i,3:7] * np.array([dw, dh, dw, dh])
+                x1,y1,x2,y2 = box.astype(int)
+
+                # 원본 화면 좌표로 변환
+                x1 += margin_x
+                x2 += margin_x
+                y1 += margin_y
+                y2 += margin_y
+
+                person_height = y2-y1
+
+                if person_height > h*0.3:
+                    return True, (x1,y1,x2,y2)
+
+
+    return False, None
+
 def get_cx_cy_angle(mask):
 
     cnts, _ = cv2.findContours(
@@ -229,6 +317,9 @@ def main():
     found_count = 0
     last_turn_dir = 'left'
     search_dir = True
+    person_detected = False
+    person_box = None
+    person_stop = False
 
     try:
         while camera.isOpened():
@@ -238,23 +329,27 @@ def main():
 
             frame = cv2.flip(frame, -1)
             frame_count += 1
+            # 사람 감지는 5프레임마다 실행
+            if frame_count % 5 == 0:
+
+                person_detected, person_box = detect_person(frame)
 
             buzzer_update()
 
             # -------------------
             # ROI 분할 (640x480 해상도 기준 최적화)
             # -------------------
-            light_roi = frame[90:200, 250:390]
+            light_roi = frame[50:160, 250:390]
             gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             blur_frame = cv2.GaussianBlur(gray_frame, (5, 5), 0)
             _, binary_frame = cv2.threshold(blur_frame, 100, 255, cv2.THRESH_BINARY)
             binary_frame = cv2.erode(binary_frame, None, iterations=1)
             binary_frame = cv2.dilate(binary_frame, None, iterations=1)
 
-            roi_top_frame = binary_frame[240:360, :]
-            roi_bottom_frame = binary_frame[360:480, :]
-            roi_top = frame[240:360, :]
-            roi_bottom = frame[360:480, :]
+            roi_top_frame = binary_frame[230:330, :]
+            roi_bottom_frame = binary_frame[330:430, :]
+            roi_top = frame[230:330, :]
+            roi_bottom = frame[330:430, :]
             h_b, w_b = roi_bottom.shape[:2]
             center_x_b = w_b // 2
 
@@ -279,7 +374,19 @@ def main():
             # -------------------
             # 신호등 제어 및 상태 기반 라인트레이싱 유지
             # -------------------
-            if current_light == 'red':
+            if person_detected:
+
+                motor_go(0)
+
+                if not person_stop:
+                    buzzer_beep(0.3)
+                    person_stop = True
+
+                action = "PERSON STOP"
+
+                state = "PERSON_STOP"
+
+            elif current_light == 'red':
                 if last_light_state != 'red':
                     buzzer_beep(0.2)
                     last_beep_time = time.time()
@@ -300,7 +407,17 @@ def main():
             else:
                 action = "NONE"
 
-            if state == 'STOP':
+            if state == 'PERSON_STOP':
+
+                motor_go(0)
+
+                if not person_detected:
+                    person_stop = False
+                    state = 'FOLLOW'
+
+
+            elif state == 'STOP':
+
                 motor_go(0)
             elif state == 'BACK':
                 motor_back(60)
@@ -402,6 +519,28 @@ def main():
             # -------------------
             # cv2.imshow('Binary', binary_frame)
 
+            if person_box is not None:
+
+                x1,y1,x2,y2 = person_box
+
+                cv2.rectangle(
+                    frame,
+                    (x1,y1),
+                    (x2,y2),
+                    (0,255,255),
+                    2
+                )
+
+                cv2.putText(
+                    frame,
+                    "PERSON",
+                    (x1,y1-10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0,255,255),
+                    2
+                )
+
             if cx_b is not None:
                 cv2.circle(frame, (cx_b, cy_b + 360), 5, (0, 0, 255), -1)
 
@@ -414,7 +553,7 @@ def main():
 
                 # ROI 좌표 -> 원본 프레임 좌표 변환
                 roi_x_offset = 250
-                roi_y_offset = 90
+                roi_y_offset = 50
 
                 x += roi_x_offset
                 y += roi_y_offset
@@ -464,10 +603,11 @@ def main():
             # -------------------
 
             # 신호등 영역
+            # 신호등 영역
             cv2.rectangle(
                 frame,
-                (250, 90),
-                (390, 200),
+                (250, 50),
+                (390, 160),
                 (255, 255, 0),
                 2
             )
