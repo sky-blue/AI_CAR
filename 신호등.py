@@ -244,7 +244,7 @@ def main():
             # -------------------
             # ROI 분할 (640x480 해상도 기준 최적화)
             # -------------------
-            light_roi = frame[90:200, :]
+            light_roi = frame[90:200, 250:390]
             gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             blur_frame = cv2.GaussianBlur(gray_frame, (5, 5), 0)
             _, binary_frame = cv2.threshold(blur_frame, 100, 255, cv2.THRESH_BINARY)
@@ -413,7 +413,7 @@ def main():
                 x, y, w, h = last_light_box
 
                 # ROI 좌표 -> 원본 프레임 좌표 변환
-                roi_x_offset = 0
+                roi_x_offset = 250
                 roi_y_offset = 90
 
                 x += roi_x_offset
@@ -457,6 +457,36 @@ def main():
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
                 text_color.get(current_light, (255,255,255)),
+                2
+            )
+            # -------------------
+            # ROI 박스 표시
+            # -------------------
+
+            # 신호등 영역
+            cv2.rectangle(
+                frame,
+                (250, 90),
+                (390, 200),
+                (255, 255, 0),
+                2
+            )
+
+            # Top ROI
+            cv2.rectangle(
+                frame,
+                (0, 240),
+                (640, 360),
+                (255, 0, 0),
+                2
+            )
+
+            # Bottom ROI
+            cv2.rectangle(
+                frame,
+                (0, 360),
+                (640, 480),
+                (0, 0, 255),
                 2
             )
             cv2.imshow('Camera', frame)  
