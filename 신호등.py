@@ -104,34 +104,33 @@ def detect_traffic_light(light_roi):
     return None
 
 
-def get_cx_cy_angle(roi):
-    if roi.ndim == 3:
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = roi
+def get_cx_cy_angle(mask):
 
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, thresh = cv2.threshold(blur, 150, 255, cv2.THRESH_BINARY)
-    mask = cv2.erode(thresh, None, iterations=1)
-    mask = cv2.dilate(mask, None, iterations=1)
+    cnts, _ = cv2.findContours(
+        mask,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_NONE
+    )
 
-    cnts, _ = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not cnts:
         return None, None, None
 
     c = max(cnts, key=cv2.contourArea)
+
     M = cv2.moments(c)
-    if M['m00'] == 0:
+
+    if M["m00"] == 0:
         return None, None, None
 
-    cx = int(M['m10'] / M['m00'])
-    cy = int(M['m01'] / M['m00'])
+    cx = int(M["m10"]/M["m00"])
+    cy = int(M["m01"]/M["m00"])
 
     x, y, w, h = cv2.boundingRect(c)
-    if w > h or w > (roi.shape[1] * 0.4):
-        line_type = 'horizontal'
+
+    if w > h or w > mask.shape[1] * 0.4:
+        line_type = "horizontal"
     else:
-        line_type = 'vertical'
+        line_type = "vertical"
 
     return cx, cy, line_type
 
@@ -157,8 +156,10 @@ def main():
     camera = mycamera.MyPiCamera(640, 480)
 
     BASE_SPEED = 100       # 최대 속도 설정
-    DEADBAND = 30         # 고속 주행 시 자잘한 흔들림 방지를 위해 데드밴드 약간 확장
-    KP = 0.2              # 고속 조향을 위한 감도 조정
+    KP = 0.25      # 기존보다 약간 증가
+    KD = 0.45      # 미분 게인
+    DEADBAND = 15  # 기존 30 → 15 추천
+    last_error = 0
     CORNER_THRESHOLD = 35 # 320x240 해상도에 맞게 코너 임계값 유지
     last_light_state = None
     last_beep_time = 0.0
@@ -191,10 +192,10 @@ def main():
             binary_frame = cv2.erode(binary_frame, None, iterations=1)
             binary_frame = cv2.dilate(binary_frame, None, iterations=1)
 
-            roi_top_frame = frame[260:380, :]
-            roi_bottom_frame = frame[380:500, :]
-            roi_top = frame[260:380, :]
-            roi_bottom = frame[380:500, :]
+            roi_top_frame = binary_frame[240:360, :]
+            roi_bottom_frame = binary_frame[360:480, :]
+            roi_top = frame[240:360, :]
+            roi_bottom = frame[360:480, :]
             h_b, w_b = roi_bottom.shape[:2]
             center_x_b = w_b // 2
 
@@ -242,6 +243,7 @@ def main():
                 if found_count >= 3:
                     state = 'FOLLOW'
                     found_count = 0
+                    last_error = 0
                 elif time.time() - search_start > 2.5:
                     state = 'STOP'
                     motor_go(0)
@@ -261,20 +263,35 @@ def main():
 
                     # 상황 2: 일반 세로선 주행 (최대 속도 유지형 차동 조향)
                     elif type_b == 'vertical':
-                        if abs_err <= DEADBAND:
+
+                        # 현재 오차
+                        error = center_x_b - cx_b
+
+                        # 변화량(D)
+                        d_error = error - last_error
+
+                        # PD 계산
+                        steering = KP * error + KD * d_error
+
+                        # 다음 프레임을 위해 저장
+                        last_error = error
+
+                        # 데드밴드
+                        if abs(error) <= DEADBAND:
                             motor_go(BASE_SPEED)
+
                         else:
+
+                            left_target = BASE_SPEED - steering
+                            right_target = BASE_SPEED + steering
+
+                            left_target = int(max(0, min(100, left_target)))
+                            right_target = int(max(0, min(100, right_target)))
+
                             if error > 0:
-                                left_target = BASE_SPEED - int(KP * abs_err)
-                                right_target = BASE_SPEED
                                 last_turn_dir = 'left'
                             else:
-                                left_target = BASE_SPEED
-                                right_target = BASE_SPEED - int(KP * abs_err)
                                 last_turn_dir = 'right'
-
-                            left_target = max(0, min(100, left_target))
-                            right_target = max(0, min(100, right_target))
 
                             motor_drive(left_target, right_target)
 
@@ -297,6 +314,7 @@ def main():
 
             if state == 'STOP' and current_light != 'red':
                 state = 'FOLLOW'
+                last_error = 0
 
             last_light_state = current_light
 
@@ -304,7 +322,7 @@ def main():
             # 디버그 화면 출력
             # -------------------
             cv2.imshow('Binary', binary_frame)
-            cv2.imshow('Bottom ROI', roi_bottom)
+            cv2.imshow("Bottom ROI", roi_bottom_frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
