@@ -64,7 +64,6 @@ buzzer_deadline = 0.0
 
 
 def buzzer_beep(duration: float = 0.2):
-    pass
     global buzzer_active, buzzer_deadline
     if buzzer_active:
         return
@@ -81,28 +80,86 @@ def buzzer_update():
         buzzer_active = False
 
 
+def largest_blob(mask):
+
+    kernel = np.ones((5,5),np.uint8)
+
+    mask = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_CLOSE,
+        kernel
+    )
+
+    mask = cv2.erode(mask,None,iterations=1)
+    mask = cv2.dilate(mask,None,iterations=2)
+
+
+    cnts, _ = cv2.findContours(
+        mask,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    if not cnts:
+        return 0, None
+
+    c = max(cnts, key=cv2.contourArea)
+
+    return cv2.contourArea(c), cv2.boundingRect(c)
+
+
+
 def detect_traffic_light(light_roi):
+
     hsv = cv2.cvtColor(light_roi, cv2.COLOR_BGR2HSV)
-    red_mask1 = cv2.inRange(hsv, np.array([0, 120, 80]), np.array([10, 255, 255]))
-    red_mask2 = cv2.inRange(hsv, np.array([160, 120, 80]), np.array([179, 255, 255]))
-    red_mask = cv2.bitwise_or(red_mask1, red_mask2)
-    orange_mask = cv2.inRange(hsv, np.array([10, 120, 80]), np.array([25, 255, 255]))
-    green_mask = cv2.inRange(hsv, np.array([40, 80, 80]), np.array([90, 255, 255]))
 
-    red_area = cv2.countNonZero(red_mask)
-    orange_area = cv2.countNonZero(orange_mask)
-    green_area = cv2.countNonZero(green_mask)
-    area = light_roi.shape[0] * light_roi.shape[1]
-    threshold = area * 0.01
 
-    if red_area > threshold:
-        return 'red'
-    if orange_area > threshold:
-        return 'orange'
-    if green_area > threshold:
-        return 'green'
-    return None
+    red1 = cv2.inRange(
+        hsv,
+        np.array([0,120,80]),
+        np.array([10,255,255])
+    )
 
+    red2 = cv2.inRange(
+        hsv,
+        np.array([160,120,80]),
+        np.array([179,255,255])
+    )
+
+    masks = {
+        "red": cv2.bitwise_or(red1,red2),
+
+        "orange": cv2.inRange(
+            hsv,
+            np.array([15,70,170]),
+            np.array([30,130,220])
+        ),
+
+        "green": cv2.inRange(
+            hsv,
+            np.array([35,60,60]),
+            np.array([90,255,255])
+        )
+    }
+
+
+    result = {}
+
+    for color,mask in masks.items():
+        result[color] = largest_blob(mask)
+
+
+    color,(area,bbox)=max(
+        result.items(),
+        key=lambda x:x[1][0]
+    )
+
+
+    if area > 150:
+        return color,bbox,area
+
+
+    return None,None,area
 
 def get_cx_cy_angle(mask):
 
@@ -160,6 +217,8 @@ def main():
     KD = 0.45      # 미분 게인
     DEADBAND = 15  # 기존 30 → 15 추천
     last_error = 0
+    last_light_box = None
+    last_light_time = 0
     CORNER_THRESHOLD = 35 # 320x240 해상도에 맞게 코너 임계값 유지
     last_light_state = None
     last_beep_time = 0.0
@@ -185,7 +244,7 @@ def main():
             # -------------------
             # ROI 분할 (640x480 해상도 기준 최적화)
             # -------------------
-            light_roi = frame[0:120, :]
+            light_roi = frame[90:200, :]
             gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             blur_frame = cv2.GaussianBlur(gray_frame, (5, 5), 0)
             _, binary_frame = cv2.threshold(blur_frame, 100, 255, cv2.THRESH_BINARY)
@@ -200,8 +259,19 @@ def main():
             center_x_b = w_b // 2
 
             current_light = last_light_state
-            if frame_count % 10 == 0:
-                current_light = detect_traffic_light(light_roi)
+            
+
+            if frame_count % 5 == 0:
+                detected_light, detected_box, area = detect_traffic_light(light_roi)
+
+                if detected_light is not None:
+                    current_light = detected_light
+                    last_light_box = detected_box
+                    last_light_time = time.time()
+                if time.time() - last_light_time > 1.0:
+                    last_light_box = None
+
+            action = "NONE"
 
             cx_b, cy_b, type_b = get_cx_cy_angle(roi_bottom_frame)
             cx_t, cy_t, type_t = get_cx_cy_angle(roi_top_frame)
@@ -213,13 +283,22 @@ def main():
                 if last_light_state != 'red':
                     buzzer_beep(0.2)
                     last_beep_time = time.time()
+
                 state = 'STOP'
                 motor_go(0)
+                action = "STOP"
             elif current_light == 'orange':
                 now = time.time()
+
                 if now - last_beep_time >= 1.0:
                     buzzer_beep(0.1)
                     last_beep_time = now
+
+                action = "BUZZER"
+            elif current_light == 'green':
+                action = "GO"
+            else:
+                action = "NONE"
 
             if state == 'STOP':
                 motor_go(0)
@@ -321,7 +400,66 @@ def main():
            # -------------------
             # 디버그 화면 출력
             # -------------------
-            cv2.imshow('Binary', binary_frame)
+            # cv2.imshow('Binary', binary_frame)
+
+            if cx_b is not None:
+                cv2.circle(frame, (cx_b, cy_b + 360), 5, (0, 0, 255), -1)
+
+            if cx_t is not None:
+                cv2.circle(frame, (cx_t, cy_t + 240), 5, (255, 0, 0), -1)
+
+
+            if last_light_box is not None:
+                x, y, w, h = last_light_box
+
+                # ROI 좌표 -> 원본 프레임 좌표 변환
+                roi_x_offset = 0
+                roi_y_offset = 90
+
+                x += roi_x_offset
+                y += roi_y_offset
+
+                color_map = {
+                    "red": (0,0,255),
+                    "orange": (0,165,255),
+                    "green": (0,255,0)
+                }
+
+                cv2.rectangle(
+                    frame,
+                    (x,y),
+                    (x+w,y+h),
+                    color_map.get(current_light, (255,255,255)),
+                    2
+                )
+
+            text_color = {
+                "red": (0,0,255),
+                "orange": (0,165,255),
+                "green": (0,255,0),
+                None: (255,255,255)
+            }
+
+            cv2.putText(
+                frame,
+                f"LIGHT : {current_light}",
+                (10,30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                text_color.get(current_light, (255,255,255)),
+                2
+            )
+
+            cv2.putText(
+                frame,
+                f"ACTION : {action}",
+                (10,60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                text_color.get(current_light, (255,255,255)),
+                2
+            )
+            cv2.imshow('Camera', frame)  
             cv2.imshow("Bottom ROI", roi_bottom_frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
