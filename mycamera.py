@@ -5,21 +5,28 @@ import time
 
 class MyPiCamera():
     def __init__(self, width, height):
-        self.cap = Picamera2()
+        self.cap = None
         self.width = width
         self.height = height
-        self.is_open = True
+        self.is_open = False
 
         try:
+            camera_info = Picamera2.global_camera_info()
+            if not camera_info:
+                print("camera not found: connect the camera and reboot Raspberry Pi")
+                return
+
+            self.cap = Picamera2()
             self.config = self.cap.create_video_configuration(
                 main={"format": "RGB888", "size": (width, height)}
             )
             self.cap.align_configuration(self.config)
             self.cap.configure(self.config)
             self.cap.start()
-            time.sleep(1) 
+            time.sleep(1)
+            self.is_open = True
         except Exception as e:
-            print("error:", e)
+            print("camera error:", e)
             self.is_open = False
     
     def read(self, dst=None):
